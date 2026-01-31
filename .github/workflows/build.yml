@@ -19,7 +19,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # 2. Install Linux System Dependencies
+      # 2. Install Minimal System Dependencies (No GStreamer to avoid conflicts)
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -29,19 +29,8 @@ jobs:
             git \
             python3-dev \
             python3-setuptools \
-            libsdl2-dev \
-            libsdl2-image-dev \
-            libsdl2-mixer-dev \
-            libsdl2-ttf-dev \
-            libportmidi-dev \
-            libswscale-dev \
-            libavformat-dev \
-            libavcodec-dev \
-            zlib1g-dev \
-            libgstreamer1.0 \
-            gstreamer1.0-plugins-base \
-            gstreamer1.0-plugins-good \
             libffi-dev \
+            libssl-dev \
             libtool \
             libtool-bin \
             autoconf \
@@ -50,7 +39,17 @@ jobs:
             gettext \
             pkg-config \
             zip \
-            unzip
+            unzip \
+            libunwind-dev \
+            libsdl2-dev \
+            libsdl2-image-dev \
+            libsdl2-mixer-dev \
+            libsdl2-ttf-dev \
+            libportmidi-dev \
+            libswscale-dev \
+            libavformat-dev \
+            libavcodec-dev \
+            zlib1g-dev
 
       # 3. Install Buildozer & Cython
       - name: Install Buildozer
@@ -58,7 +57,7 @@ jobs:
           pip3 install --upgrade pip
           pip3 install buildozer==1.5.0 cython==0.29.33
 
-      # 4. Run the Build (Yes command accepts licenses automatically)
+      # 4. Run the Build
       - name: Build APK
         run: |
           yes | buildozer android debug
