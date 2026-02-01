@@ -1,291 +1,317 @@
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.core.window import Window
-from kivy.graphics import Color, Line, RoundedRectangle, Rectangle
+from kivy.graphics import Color, RoundedRectangle
 from kivy.utils import get_color_from_hex
+from kivy.clock import Clock
 import webbrowser
 import requests
 import threading
-import json
+import socket
+from plyer import battery
 
-# --- THEME CONFIG ---
-Window.clearcolor = (0.05, 0.05, 0.05, 1) # Void Black
-C_NEON = get_color_from_hex("#00FF41")    # Hacker Green
-C_CYAN = get_color_from_hex("#00E5FF")    # Cyber Blue
-C_WARN = get_color_from_hex("#FFD700")    # Gold
-C_ERR  = get_color_from_hex("#FF3333")    # Red
+# --- MODERN THEME PALETTE ---
+C_BG      = get_color_from_hex("#121212")  # Material Dark Background
+C_SURFACE = get_color_from_hex("#1E1E1E")  # Card Background
+C_ACCENT  = get_color_from_hex("#2979FF")  # Electric Blue (Primary)
+C_TEXT    = get_color_from_hex("#FFFFFF")  # Primary Text
+C_SUBTEXT = get_color_from_hex("#B0B0B0")  # Secondary Text
+C_DANGER  = get_color_from_hex("#CF6679")  # Error/Danger
 
-# --- CUSTOM WIDGETS (For the Modern Look) ---
-class NeonButton(Button):
+Window.clearcolor = C_BG
+
+# --- CUSTOM MODERN WIDGETS ---
+
+class ModernButton(Button):
+    """A sleek, solid rounded button"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.background_color = (0,0,0,0) # Transparent
-        self.color = C_NEON
-        self.font_name = "Roboto"
-        self.font_size = "18sp"
+        self.background_color = (0,0,0,0)
+        self.background_normal = ''
+        self.color = C_TEXT
         self.bold = True
+        self.font_size = "16sp"
         self.bind(pos=self.update_canvas, size=self.update_canvas)
+        self.btn_color = C_ACCENT 
 
     def update_canvas(self, *args):
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*self.color)
-            Line(rounded_rectangle=(self.x, self.y, self.width, self.height, 10), width=1.5)
+            Color(*self.btn_color)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[12])
 
-class TerminalLabel(Label):
+class ModernInput(TextInput):
+    """A minimal input field with no ugly borders"""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.background_normal = ''
+        self.background_active = ''
+        self.background_color = C_SURFACE
+        self.foreground_color = C_TEXT
+        self.cursor_color = C_ACCENT
+        self.padding = [15, 15, 15, 15]
+        self.font_size = "16sp"
+        self.hint_text_color = C_SUBTEXT
+        self.multiline = False
+
+class ToolCard(Button):
+    """A Dashboard Card acting as a button"""
+    def __init__(self, title, desc, icon_text, **kwargs):
+        super().__init__(**kwargs)
+        self.background_color = (0,0,0,0)
+        self.title = title
+        self.desc = desc
+        self.icon_text = icon_text
+        self.bind(pos=self.update_canvas, size=self.update_canvas)
+
+    def update_canvas(self, *args):
+        self.canvas.before.clear()
+        self.canvas.after.clear()
+        
+        # Card Background
+        with self.canvas.before:
+            Color(*C_SURFACE)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[18])
+        
+        # Text Rendering manually because Button text layout is limited
+        with self.canvas.after:
+            # Icon (simulated with text)
+            # You would normally use an Image widget here, but we are keeping it single-file
+            pass
+
+class LogLabel(Label):
     def on_ref_press(self, instance):
-        # This handles the clickable links
         webbrowser.open(instance)
 
-# --- SCREEN 1: HOME MENU ---
-class MenuScreen(Screen):
+# --- BASE SCREEN CLASS (Handles common layout) ---
+class BaseScreen(Screen):
+    def add_header(self, title, subtitle):
+        header = BoxLayout(orientation='vertical', size_hint=(1, None), height=80, padding=[0, 10, 0, 10])
+        header.add_widget(Label(text=title, font_size="24sp", bold=True, color=C_TEXT, halign="left", size_hint=(1, 0.6)))
+        header.add_widget(Label(text=subtitle, font_size="14sp", color=C_SUBTEXT, halign="left", size_hint=(1, 0.4)))
+        return header
+
+    def add_back_btn(self):
+        btn = Button(text="← Back", size_hint=(None, None), size=(100, 40), background_color=(0,0,0,0), color=C_ACCENT)
+        btn.bind(on_press=self.go_back)
+        return btn
+    
+    def go_back(self, *args):
+        self.manager.transition = SlideTransition(direction="right")
+        self.manager.current = 'dash'
+
+# --- SCREEN 1: DASHBOARD ---
+class DashboardScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
+        
+        # Main Container
+        root = BoxLayout(orientation='vertical', padding=25, spacing=20)
+
+        # 1. Header Area
+        header = BoxLayout(orientation='vertical', size_hint=(1, 0.2))
+        header.add_widget(Label(text="PasientNull", font_size="28sp", bold=True, color=C_TEXT, size_hint=(1, 0.6), halign="left", text_size=(Window.width-50, None)))
+        header.add_widget(Label(text="Command Center", font_size="16sp", color=C_SUBTEXT, size_hint=(1, 0.4), halign="left", text_size=(Window.width-50, None)))
+        root.add_widget(header)
+
+        # 2. Status Card (Mini Dashboard)
+        status_card = BoxLayout(orientation='vertical', size_hint=(1, 0.15), padding=15)
+        self.lbl_ip = Label(text="IP: ...", color=C_ACCENT, font_size="14sp", bold=True)
+        self.lbl_bat = Label(text="Battery: ...", color=C_SUBTEXT, font_size="14sp")
+        status_card.canvas.before.add(Color(*C_SURFACE))
+        status_card.canvas.before.add(RoundedRectangle(pos=status_card.pos, size=status_card.size, radius=[15]))
+        status_card.bind(pos=self.update_rect, size=self.update_rect)
+        
+        status_card.add_widget(self.lbl_ip)
+        status_card.add_widget(self.lbl_bat)
+        root.add_widget(status_card)
+
+        # 3. Tools Grid
+        scroll = ScrollView(size_hint=(1, 0.65), do_scroll_x=False)
+        grid = GridLayout(cols=2, spacing=15, size_hint_y=None, padding=[0, 10, 0, 0])
+        grid.bind(minimum_height=grid.setter('height'))
+
+        # Helper to make cards
+        def make_card(title, func):
+            btn = ModernButton(text=title)
+            btn.background_color = (0,0,0,0)
+            btn.btn_color = C_SURFACE # Card color
+            btn.color = C_TEXT
+            btn.size_hint_y = None
+            btn.height = 120
+            btn.bind(on_press=func)
+            return btn
+
+        grid.add_widget(make_card("User\nHunt", lambda x: self.nav('user')))
+        grid.add_widget(make_card("Net\nProbe", lambda x: self.nav('net')))
+        grid.add_widget(make_card("Tech\nStack", lambda x: self.nav('tech')))
+        grid.add_widget(make_card("Domain\nRecon", lambda x: self.nav('sub')))
+
+        scroll.add_widget(grid)
+        root.add_widget(scroll)
+        self.add_widget(root)
+
+        # Start Background Tasks
+        Clock.schedule_interval(self.update_stats, 5)
+
+    def update_rect(self, instance, value):
+        instance.canvas.before.clear()
+        with instance.canvas.before:
+            Color(*C_SURFACE)
+            RoundedRectangle(pos=instance.pos, size=instance.size, radius=[15])
+
+    def nav(self, name):
+        self.manager.transition = SlideTransition(direction="left")
+        self.manager.current = name
+
+    def update_stats(self, dt):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            self.lbl_ip.text = f"Local IP: {s.getsockname()[0]}"
+            s.close()
+        except: self.lbl_ip.text = "Local IP: Disconnected"
+
+        try:
+            self.lbl_bat.text = f"Battery: {battery.status.get('percentage', '?')}%"
+        except: pass
+
+# --- SCREEN 2: GENERIC TOOL SCREEN (Used for all tools) ---
+class ToolScreen(BaseScreen):
+    def __init__(self, name, title, placeholder, btn_text, logic_func, **kwargs):
+        super().__init__(**kwargs)
+        self.logic_func = logic_func
+        
+        root = BoxLayout(orientation='vertical', padding=25, spacing=20)
         
         # Header
-        layout.add_widget(Label(text="[b]PASIENTNULL[/b]\nMOBILE COMMAND", markup=True, 
-                                font_size='24sp', color=C_NEON, size_hint=(1, 0.3)))
-        
-        # Buttons
-        btn_user = NeonButton(text="IDENTITY HUNTER")
-        btn_user.bind(on_press=self.go_user)
-        layout.add_widget(btn_user)
+        root.add_widget(self.add_back_btn())
+        root.add_widget(Label(text=title, font_size="26sp", bold=True, color=C_TEXT, size_hint=(1, 0.1), halign="left", text_size=(Window.width-50, None)))
 
-        btn_spy = NeonButton(text="SERVER SPY (HTTP)")
-        btn_spy.color = C_CYAN
-        btn_spy.bind(on_press=self.go_spy)
-        layout.add_widget(btn_spy)
-
-        btn_ip = NeonButton(text="IP GEOLOCATOR")
-        btn_ip.color = C_WARN
-        btn_ip.bind(on_press=self.go_ip)
-        layout.add_widget(btn_ip)
-
-        layout.add_widget(Label(size_hint=(1, 0.2))) # Spacer
-        self.add_widget(layout)
-
-    def go_user(self, *args): self.manager.transition = SlideTransition(direction="left"); self.manager.current = 'user'
-    def go_spy(self, *args): self.manager.transition = SlideTransition(direction="left"); self.manager.current = 'spy'
-    def go_ip(self, *args): self.manager.transition = SlideTransition(direction="left"); self.manager.current = 'ip'
-
-# --- SCREEN 2: USER HUNTER ---
-class UserScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        vbox = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        
-        # Top Bar
-        hbox = BoxLayout(size_hint=(1, 0.1))
-        btn_back = Button(text="<", size_hint=(0.2, 1), background_color=(0.2,0.2,0.2,1))
-        btn_back.bind(on_press=self.go_back)
-        self.inp = TextInput(hint_text="Username", size_hint=(0.8, 1), multiline=False, 
-                             background_color=(0.1,0.1,0.1,1), foreground_color=(1,1,1,1))
-        hbox.add_widget(btn_back)
-        hbox.add_widget(self.inp)
-        vbox.add_widget(hbox)
+        # Input
+        self.inp = ModernInput(hint_text=placeholder, size_hint=(1, None), height=60)
+        root.add_widget(self.inp)
 
         # Action Button
-        btn_scan = NeonButton(text="INITIATE SCAN", size_hint=(1, 0.1))
-        btn_scan.bind(on_press=self.start_scan)
-        vbox.add_widget(btn_scan)
+        btn = ModernButton(text=btn_text, size_hint=(1, None), height=60)
+        btn.bind(on_press=self.start_task)
+        root.add_widget(btn)
 
-        # Output
-        self.scroll = ScrollView(size_hint=(1, 0.8))
-        self.out = TerminalLabel(text="Waiting for target...", size_hint_y=None, markup=True, padding=(10,10))
+        # Output Log (Card style)
+        self.scroll = ScrollView(size_hint=(1, 0.6))
+        self.out = LogLabel(text="Ready...", size_hint_y=None, markup=True, padding=[15,15])
         self.out.bind(texture_size=self.out.setter('size'))
-        self.scroll.add_widget(self.out)
-        vbox.add_widget(self.scroll)
-        self.add_widget(vbox)
+        
+        # Background for log
+        with self.out.canvas.before:
+            Color(*C_SURFACE)
+            self.rect = RoundedRectangle(pos=self.out.pos, size=self.out.size, radius=[12])
+        self.out.bind(pos=self.update_rect, size=self.update_rect)
 
-    def go_back(self, *args): self.manager.transition = SlideTransition(direction="right"); self.manager.current = 'menu'
+        self.scroll.add_widget(self.out)
+        root.add_widget(self.scroll)
+        self.add_widget(root)
+
+    def update_rect(self, instance, value):
+        self.rect.pos = instance.pos
+        self.rect.size = instance.size
 
     def log(self, msg):
-        # Kivy requires UI updates on main thread
-        from kivy.clock import Clock
         Clock.schedule_once(lambda dt: setattr(self.out, 'text', self.out.text + msg + "\n"))
 
-    def start_scan(self, instance):
+    def start_task(self, instance):
         target = self.inp.text
-        if not target: return
-        self.out.text = ""
-        self.log(f"[color=#00ff00]SCANNING: {target}[/color]\n")
-        threading.Thread(target=self.run_logic, args=(target,), daemon=True).start()
+        self.out.text = "" # Clear
+        threading.Thread(target=self.logic_func, args=(target, self.log), daemon=True).start()
 
-    def run_logic(self, target):
-        # EXPANDED DATABASE (Add as many as you want here)
-        sites = {
-            "Instagram": "https://www.instagram.com/{}",
-            "TikTok": "https://www.tiktok.com/@{}",
-            "Twitter": "https://twitter.com/{}",
-            "GitHub": "https://github.com/{}",
-            "Reddit": "https://www.reddit.com/user/{}",
-            "Twitch": "https://www.twitch.tv/{}",
-            "Pinterest": "https://www.pinterest.com/{}",
-            "SoundCloud": "https://soundcloud.com/{}",
-            "DeviantArt": "https://www.deviantart.com/{}",
-            "Steam": "https://steamcommunity.com/id/{}",
-            "Wikipedia": "https://en.wikipedia.org/wiki/User:{}",
-            "Pastebin": "https://pastebin.com/u/{}",
-            "Patreon": "https://www.patreon.com/{}",
-            "Medium": "https://medium.com/@{}",
-            "Vimeo": "https://vimeo.com/{}"
-        }
+
+# --- LOGIC FUNCTIONS (Separated for cleanliness) ---
+
+def logic_user_hunt(target, log):
+    log(f"[b]Scanning:[/b] {target}")
+    if not target: return
+    sites = {"GitHub": "https://github.com/{}", "Twitter": "https://twitter.com/{}", "Instagram": "https://instagram.com/{}", "Reddit": "https://reddit.com/user/{}"}
+    for s, u in sites.items():
+        try:
+            if requests.get(u.format(target), headers={'User-Agent':'Moz'}, timeout=4).status_code == 200:
+                log(f"[color=2979FF]Found: {s}[/color]")
+                log(f"[ref={u.format(target)}]>> Open Profile[/ref]")
+        except: pass
+    log("Scan Complete.")
+
+def logic_tech_stack(target, log):
+    if not target.startswith("http"): target = "http://" + target
+    log(f"Analyzing {target}...")
+    try:
+        r = requests.get(target, timeout=5, verify=False)
+        if 'Server' in r.headers: log(f"Server: {r.headers['Server']}")
+        if 'X-Powered-By' in r.headers: log(f"Powered By: {r.headers['X-Powered-By']}")
         
-        headers = {'User-Agent': 'Mozilla/5.0 (Android 10; Mobile; rv:68.0)'}
-        found_count = 0
-
-        for site, url_temp in sites.items():
-            url = url_temp.format(target)
-            try:
-                r = requests.get(url, headers=headers, timeout=4)
-                if r.status_code == 200:
-                    found_count += 1
-                    # CLICKABLE LINK MARKUP
-                    self.log(f"[color=#00ff41][b]FOUND: {site}[/b][/color]")
-                    self.log(f"[ref={url}][color=#00E5FF]>> OPEN LINK[/color][/ref]")
-                elif r.status_code == 404:
-                    self.log(f"[color=#555555]Missing: {site}[/color]")
-            except:
-                self.log(f"[color=#FF3333]Error: {site}[/color]")
+        # CMS Checks
+        txt = r.text.lower()
+        if 'wp-content' in txt: log("[color=2979FF]Detected: WordPress[/color]")
+        elif 'shopify' in txt: log("[color=2979FF]Detected: Shopify[/color]")
         
-        self.log(f"\n[b]SCAN COMPLETE. FOUND {found_count} PROFILES.[/b]")
+        # Sensitive Files
+        log("\nChecking Paths...")
+        for f in ['robots.txt', 'sitemap.xml', 'admin']:
+            if requests.head(f"{target}/{f}", timeout=3).status_code == 200:
+                log(f"[color=00FF00]Found: /{f}[/color]")
+    except Exception as e: log(f"[color=CF6679]Error: {e}[/color]")
 
-# --- SCREEN 3: SERVER SPY ---
-class SpyScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        vbox = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        
-        hbox = BoxLayout(size_hint=(1, 0.1))
-        btn_back = Button(text="<", size_hint=(0.2, 1), background_color=(0.2,0.2,0.2,1))
-        btn_back.bind(on_press=self.go_back)
-        self.inp = TextInput(hint_text="Domain (google.com)", size_hint=(0.8, 1), multiline=False, background_color=(0.1,0.1,0.1,1), foreground_color=(1,1,1,1))
-        hbox.add_widget(btn_back)
-        hbox.add_widget(self.inp)
-        vbox.add_widget(hbox)
+def logic_subdomain(target, log):
+    log(f"Querying Certificate Logs for {target}...")
+    try:
+        url = f"https://crt.sh/?q=%25.{target}&output=json"
+        data = requests.get(url, timeout=10).json()
+        subs = set([entry['name_value'] for entry in data])
+        log(f"Found {len(subs)} subdomains:\n")
+        for s in subs: log(f"> {s}")
+    except: log("[color=CF6679]Query Failed[/color]")
 
-        btn_scan = NeonButton(text="ANALYZE SERVER", size_hint=(1, 0.1))
-        btn_scan.color = C_CYAN
-        btn_scan.bind(on_press=self.start_scan)
-        vbox.add_widget(btn_scan)
-
-        self.scroll = ScrollView(size_hint=(1, 0.8))
-        self.out = TerminalLabel(text="Ready to intercept...", size_hint_y=None, markup=True, padding=(10,10))
-        self.out.bind(texture_size=self.out.setter('size'))
-        self.scroll.add_widget(self.out)
-        vbox.add_widget(self.scroll)
-        self.add_widget(vbox)
-
-    def go_back(self, *args): self.manager.transition = SlideTransition(direction="right"); self.manager.current = 'menu'
+def logic_netprobe(target, log):
+    # My IP Check
+    if not target:
+        log("Fetching External IP...")
+        try:
+            d = requests.get("http://ip-api.com/json/", timeout=5).json()
+            log(f"Public IP: {d['query']}")
+            log(f"ISP: {d['isp']}")
+            log(f"Location: {d['city']}, {d['country']}")
+            return
+        except: return log("Connection Failed")
     
-    def start_scan(self, instance):
-        target = self.inp.text
-        if not target: return
-        if not target.startswith("http"): target = "http://" + target
-        self.out.text = ""
-        threading.Thread(target=self.run_logic, args=(target,), daemon=True).start()
-
-    def run_logic(self, target):
-        from kivy.clock import Clock
-        def log(msg): Clock.schedule_once(lambda dt: setattr(self.out, 'text', self.out.text + msg + "\n"))
-        
-        log(f"[color=#00E5FF]CONNECTING TO: {target}[/color]")
-        try:
-            r = requests.head(target, timeout=5)
-            log(f"STATUS: {r.status_code}")
-            
-            # Interesting Headers
-            keys = ['Server', 'X-Powered-By', 'Strict-Transport-Security', 'Content-Security-Policy']
-            for k in r.headers:
-                val = r.headers[k]
-                if k in keys:
-                     log(f"[color=#00ff41]{k}:[/color] {val}")
-                else:
-                     log(f"[color=#888]{k}: {val}[/color]")
-            
-            if 'Server' not in r.headers:
-                log("\n[!] Server header is hidden (Good OpSec).")
-                
-        except Exception as e:
-            log(f"[color=#FF3333]CONNECTION FAILED:\n{str(e)}[/color]")
-
-# --- SCREEN 4: IP GEOLOCATOR ---
-class IPScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        vbox = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        
-        hbox = BoxLayout(size_hint=(1, 0.1))
-        btn_back = Button(text="<", size_hint=(0.2, 1), background_color=(0.2,0.2,0.2,1))
-        btn_back.bind(on_press=self.go_back)
-        self.inp = TextInput(hint_text="IP (Leave empty for my IP)", size_hint=(0.8, 1), multiline=False, background_color=(0.1,0.1,0.1,1), foreground_color=(1,1,1,1))
-        hbox.add_widget(btn_back)
-        hbox.add_widget(self.inp)
-        vbox.add_widget(hbox)
-
-        btn_scan = NeonButton(text="LOCATE TARGET", size_hint=(1, 0.1))
-        btn_scan.color = C_WARN
-        btn_scan.bind(on_press=self.start_scan)
-        vbox.add_widget(btn_scan)
-
-        self.scroll = ScrollView(size_hint=(1, 0.8))
-        self.out = TerminalLabel(text="Global Positioning Ready...", size_hint_y=None, markup=True, padding=(10,10))
-        self.out.bind(texture_size=self.out.setter('size'))
-        self.scroll.add_widget(self.out)
-        vbox.add_widget(self.scroll)
-        self.add_widget(vbox)
-
-    def go_back(self, *args): self.manager.transition = SlideTransition(direction="right"); self.manager.current = 'menu'
-
-    def start_scan(self, instance):
-        target = self.inp.text
-        self.out.text = ""
-        threading.Thread(target=self.run_logic, args=(target,), daemon=True).start()
-
-    def run_logic(self, target):
-        from kivy.clock import Clock
-        def log(msg): Clock.schedule_once(lambda dt: setattr(self.out, 'text', self.out.text + msg + "\n"))
-        
-        url = f"http://ip-api.com/json/{target}" if target else "http://ip-api.com/json/"
-        log(f"[color=#FFD700]TRACING SIGNAL...[/color]")
-        
-        try:
-            data = requests.get(url, timeout=5).json()
-            if data.get('status') == 'fail':
-                log("[!] QUERY FAILED")
-                return
-
-            log(f"[b]IP:[/b] {data.get('query')}")
-            log(f"[b]ISP:[/b] {data.get('isp')}")
-            log(f"[b]ORG:[/b] {data.get('org')}")
-            log(f"[b]CITY:[/b] {data.get('city')}")
-            log(f"[b]REGION:[/b] {data.get('regionName')}")
-            log(f"[b]COUNTRY:[/b] {data.get('country')}")
-            
-            # Map Link
-            lat = data.get('lat')
-            lon = data.get('lon')
-            map_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-            log(f"\n[ref={map_url}][color=#00E5FF]>> OPEN ON GOOGLE MAPS[/color][/ref]")
-
-        except Exception as e:
-            log(f"[color=#FF3333]Error: {str(e)}[/color]")
+    # Port Scan
+    log(f"Scanning Ports: {target}")
+    try:
+        ip = socket.gethostbyname(target)
+        log(f"IP: {ip}")
+        for p in [21, 22, 80, 443, 3389, 8080]:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            if s.connect_ex((ip, p)) == 0: log(f"[color=00FF00]Open: {p}[/color]")
+            s.close()
+    except: log("Resolution Failed")
 
 # --- APP BUILDER ---
 class PasientNullMobile(App):
     def build(self):
         sm = ScreenManager()
-        sm.add_widget(MenuScreen(name='menu'))
-        sm.add_widget(UserScreen(name='user'))
-        sm.add_widget(SpyScreen(name='spy'))
-        sm.add_widget(IPScreen(name='ip'))
+        sm.add_widget(DashboardScreen(name='dash'))
+        
+        # We reuse the Generic Tool Screen to save code space
+        sm.add_widget(ToolScreen(name='user', title="Identity Hunter", placeholder="Username", btn_text="Start Scan", logic_func=logic_user_hunt))
+        sm.add_widget(ToolScreen(name='tech', title="Tech Stack", placeholder="domain.com", btn_text="Analyze", logic_func=logic_tech_stack))
+        sm.add_widget(ToolScreen(name='sub', title="Domain Recon", placeholder="domain.com", btn_text="Find Subdomains", logic_func=logic_subdomain))
+        sm.add_widget(ToolScreen(name='net', title="Net Probe", placeholder="IP/Domain (Empty for My IP)", btn_text="Diagnose", logic_func=logic_netprobe))
+        
         return sm
 
 if __name__ == '__main__':
